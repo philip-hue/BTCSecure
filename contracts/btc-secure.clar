@@ -76,3 +76,76 @@
   { asset: (string-ascii 10) }
   { amount: uint }
 )
+
+;; Protocol Statistics
+
+;; Total collateral held by the protocol (in satoshis)
+(define-data-var total-collateral uint u0)
+
+;; Total amount borrowed from the protocol (in USD cents)
+(define-data-var total-borrowed uint u0)
+
+;; Total fees collected by the protocol (in USD cents)
+(define-data-var total-fees-collected uint u0)
+
+;; Governance Token
+
+;; Governance token balances by user
+(define-map governance-token-balances
+  { owner: principal }
+  { balance: uint }
+)
+
+;; Authorization Functions
+
+;; Check if caller is the contract owner
+(define-private (is-contract-owner)
+  (is-eq tx-sender (var-get contract-owner))
+)
+
+;; Check if caller is an authorized oracle provider
+(define-private (is-authorized-oracle)
+  ;; In production, would check against a whitelist
+  (is-eq tx-sender (var-get contract-owner))
+)
+
+;; Check if the protocol is currently paused
+(define-private (assert-not-paused)
+  (ok (asserts! (not (var-get protocol-paused)) ERR_PROTOCOL_PAUSED))
+)
+
+;; Math Helpers
+
+;; Safely perform multiplication and division: (a * b) / c
+(define-private (mul-div (a uint) (b uint) (c uint))
+  (begin
+    (asserts! (> c u0) ERR_INVALID_AMOUNT)
+    (ok (/ (* a b) c))
+  )
+)
+
+;; Oracle Functions
+
+;; Update the BTC price from an authorized oracle
+(define-public (update-btc-price (new-price uint))
+  (begin
+    (asserts! (is-authorized-oracle) ERR_UNAUTHORIZED)
+    (asserts! (> new-price u0) ERR_INVALID_AMOUNT)
+    (asserts! (< new-price u10000000000) ERR_INVALID_AMOUNT) ;; $100,000 ceiling
+    (var-set btc-price-in-usd new-price)
+    (var-set btc-price-last-updated stacks-block-height)
+    (ok new-price)
+  )
+)
+
+;; Get the current BTC price, checking for validity
+(define-private (get-btc-price)
+  (let ((current-price (var-get btc-price-in-usd))
+        (last-updated (var-get btc-price-last-updated)))
+    (if (or (is-eq current-price u0) 
+            (> (- stacks-block-height last-updated) (var-get oracle-price-validity-period)))
+      ERR_ORACLE_ERROR
+      (ok current-price)
+    )
+  )
+)
